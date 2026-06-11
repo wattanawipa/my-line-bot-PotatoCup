@@ -22,11 +22,13 @@ app.post('/webhook', line.middleware(config), (req, res) => {
 });
 
 async function handleEvent(event) {
+  // ลิงก์หน้าตาราง Google Sheet ของคุณเพื่อให้คนในกลุ่มกดเข้ามาดูคลังรูปได้
+  const myGoogleSheetLink = process.env.MY_GOOGLE_SHEET_LINK || "https://google.com";
+
   // 1. เก็บข้อความตัวอักษรลง Google Sheet
   if (event.type === 'message' && event.message.type === 'text') {
     const userText = event.message.text;
     
-    // ส่งข้อมูลไปบันทึกใน Google Sheet (ผ่านระบบ Web App)
     if (process.env.GOOGLE_SHEET_URL) {
       await axios.post(process.env.GOOGLE_SHEET_URL, {
         type: 'text',
@@ -40,10 +42,9 @@ async function handleEvent(event) {
     });
   }
 
-  // 2. เก็บไฟล์รูปภาพลง Google Sheet (เก็บเป็นลิงก์ไฟล์ของ LINE)
+  // 2. เก็บไฟล์รูปภาพลง Google Sheet + ส่งลิงก์ตารางกลับมาให้คนในกลุ่มเปิดดูคลังรูป
   if (event.type === 'message' && event.message.type === 'image') {
     const messageId = event.message.id;
-    // ลิงก์รูปภาพของ LINE (สามารถนำไปเปิดดูในระบบหลังบ้านหรือเบราว์เซอร์ได้)
     const lineImageUrl = `https://line.me{messageId}/content`;
 
     if (process.env.GOOGLE_SHEET_URL) {
@@ -53,12 +54,12 @@ async function handleEvent(event) {
       }).catch(e => console.error(e));
     }
 
+    // ข้อความตอบกลับพร้อมลิงก์ตารางคลังรูปถาวรให้คนในกลุ่มกดเข้าดูได้
+    const replyText = `📸 บอทเซฟรูปเข้าคลังถาวรเรียบร้อยครับ!\n\n📂 เปิดดูคลังรูปภาพทั้งหมดของกลุ่มได้ที่ลิงก์นี้ (ไม่มีวันหมดอายุ):\n${myGoogleSheetLink}`;
+
     await client.replyMessage({
       replyToken: event.replyToken,
-      messages: [{ 
-        type: 'text', 
-        text: `📸 บอทเซฟลิงก์รูปภาพลงตาราง Google Sheet ให้เรียบร้อยแล้วครับ!` 
-      }]
+      messages: [{ type: 'text', text: replyText }]
     });
   }
 }
