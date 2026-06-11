@@ -24,15 +24,17 @@ app.post('/webhook', line.middleware(config), (req, res) => {
 async function handleEvent(event) {
   const myGoogleSheetLink = process.env.MY_GOOGLE_SHEET_LINK || "https://google.com";
   
-  // 🔍 ตรวจสอบและดึงชื่อไลน์ (Display Name) ของคนส่งรูปภาพ
   let displayName = "สมาชิกในกลุ่ม";
   try {
     if (event.source && event.source.userId) {
       let profile;
       if (event.source.groupId) {
-        profile = await client.getGroupMemberProfile(event.source.groupId, event.source.userId);
+        profile = await client.getGroupMemberProfile({
+          groupId: event.source.groupId,
+          userId: event.source.userId
+        });
       } else {
-        profile = await client.getProfile(event.source.userId);
+        profile = await client.getProfile({ userId: event.source.userId });
       }
       if (profile && profile.displayName) {
         displayName = profile.displayName;
@@ -42,9 +44,8 @@ async function handleEvent(event) {
     console.error("Cannot get profile name:", error);
   }
 
-  // ❌ [ยกเลิกการเก็บข้อความ] หากผู้ใช้ส่งข้อความตัวอักษร บอทจะไม่ส่งเข้า Google Sheet
+  // ยกเลิกการเก็บข้อความตัวอักษร
   if (event.type === 'message' && event.message.type === 'text') {
-    // บอทพิมพ์ตอบปกติ แต่จะไม่ส่งข้อมูลไปที่ Google Sheet ครับ ตารางจะสะอาด
     const userText = event.message.text;
     await client.replyMessage({
       replyToken: event.replyToken,
@@ -52,19 +53,19 @@ async function handleEvent(event) {
     });
   }
 
-  // 📸 [เก็บเฉพาะรูปภาพ] ดักจับรูปภาพและโยนไฟล์ส่งไปวาดลงตารางชีต
+  // 📸 ดักจับรูปภาพ (แก้ไขจุด messageId และลิงก์คอนเทนต์ตัวเต็ม)
   if (event.type === 'message' && event.message.type === 'image') {
     const messageId = event.message.id;
     
-    // เปลี่ยนมาใช้โครงสร้างลิงก์รูปภาพขนาดจิ๋ว (Thumbnail) ของ LINE แทน เพื่อให้ Google Sheet ยอมดึงรูปไปวาดได้ 100%
-    const lineImageUrl = `https://line.me{messageId}/content/preview`;
+    // 🌟 แก้ไข: ใช้ตัวแปร messageId จริงใส่เข้าไปในลิงก์ และดึงไฟล์คอนเทนต์ตรงๆ เพื่อไม่ให้ LINE บล็อก
+    const lineImageUrl = `https://line.me{messageId}/content`;
 
     if (process.env.GOOGLE_SHEET_URL) {
       await axios.post(process.env.GOOGLE_SHEET_URL, {
         type: 'image',
         userName: displayName,
         data: lineImageUrl,
-        token: config.channelAccessToken // แนบ Token ไปให้ Google Sheets ดึงเบื้องหลัง
+        token: config.channelAccessToken
       }).catch(e => console.error(e));
     }
 
