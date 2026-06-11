@@ -1,6 +1,6 @@
 const express = require('express');
 const line = require('@line/bot-sdk');
-const { createClient } = require('@supabase/supabase-js');
+const axios = require('axios');
 
 const app = express();
 
@@ -8,9 +8,6 @@ const config = {
   channelAccessToken: process.env.CHANNEL_ACCESS_TOKEN,
   channelSecret: process.env.CHANNEL_SECRET,
 };
-
-// เชื่อมต่อ Supabase
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
 const client = new line.messagingApi.MessagingApiClient({
   channelAccessToken: config.channelAccessToken
@@ -29,21 +26,21 @@ app.post('/webhook', line.middleware(config), (req, res) => {
 });
 
 async function handleEvent(event) {
+  // 1. รับข้อความตัวอักษรธรรมดา
   if (event.type === 'message' && event.message.type === 'text') {
     const userText = event.message.text;
     await client.replyMessage({
       replyToken: event.replyToken,
-      messages: [{ type: 'text', text: `บอทได้รับคำว่า: ${userText}` }]
+      messages: [{ type: 'text', text: ` ${userText}` }]
     });
   }
 
-  // ดักจับรูปภาพแล้วส่งเข้า Supabase
+  // 2. รับรูปภาพจาก LINE แล้วส่งเข้าคลังถาวรของ Imgur
   if (event.type === 'message' && event.message.type === 'image') {
     const messageId = event.message.id;
-    const fileName = `${Date.now()}_${messageId}.jpg`; // ตั้งชื่อไฟล์ไม่ให้ซ้ำกัน
 
     try {
-      // 1. ดึงรูปจาก LINE
+      // ดึงรูปภาพดิบจาก LINE
       const response = await blobClient.getMessageContent(messageId);
       const chunks = [];
       for await (const chunk of response) {
@@ -51,32 +48,28 @@ async function handleEvent(event) {
       }
       const buffer = Buffer.concat(chunks);
 
-      // 2. อัปโหลดขึ้น Supabase Storage
-      const { data, error } = await supabase.storage
-        .from('line-images')
-        .upload(fileName, buffer, {
-          contentType: 'image/jpeg',
-          upsert: true
-        });
+      // ยิงส่งรูปภาพไปเก็บที่ Imgur
+      const imgurResponse = await axios.post('https://imgur.com', buffer, {
+        headers: {
+          Authorization: `Client-ID ${process.env.IMGUR_CLIENT_ID}`,
+          'Content-Type': 'application/octet-stream',
+        },
+      });
 
-      if (error) throw error;
+      // ดึงลิงก์รูปภาพถาวร
+      const permanentUrl = imgurResponse.data.data.link;
 
-      // 3. ดึงลิงก์รูปภาพสาธารณะที่ไม่มีวันหมดอายุ
-      const { data: { publicUrl } } = supabase.storage
-        .from('line-images')
-        .getPublicUrl(fileName);
-
-      // 4. ส่งลิงก์กลับไปในกลุ่ม LINE
+      // พิมพ์ลิงก์ตอบกลับเข้าไปในแชท LINE
       await client.replyMessage({
         replyToken: event.replyToken,
         messages: [{ 
           type: 'text', 
-          text: `📸 เซฟรูปลงคลังส่วนตัวฟรีตลอดชีพเรียบร้อยครับ!\nลิงก์ดูรูป:\n${publicUrl}` 
+          text: `📸 เซฟรูปเข้าคลังถาวรเรียบร้อยครับ!\nลิงก์ดูรูปฟรีตลอดไป:\n${permanentUrl}` 
         }]
       });
 
     } catch (err) {
-      console.error('Failed to save image to Supabase:', err);
+      console.error('Imgur Upload Failed:', err.message);
     }
   }
 }
