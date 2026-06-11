@@ -22,40 +22,65 @@ app.post('/webhook', line.middleware(config), (req, res) => {
 });
 
 async function handleEvent(event) {
-  // ลิงก์หน้าตาราง Google Sheet ของคุณเพื่อให้คนในกลุ่มกดเข้ามาดูคลังรูปได้
   const myGoogleSheetLink = process.env.MY_GOOGLE_SHEET_LINK || "https://google.com";
+  
+  // ตรวจสอบห้องแชทและดึงชื่อผู้ส่ง
+  let userName = "ไม่ระบุชื่อ";
+  try {
+    if (event.source.userId) {
+      let profile;
+      if (event.source.groupId) {
+        // ถ้าส่งในกลุ่ม ให้ดึงโปรไฟล์จากในกลุ่ม
+        profile = await client.getGroupMemberProfile({
+          groupId: event.source.groupId,
+          userId: event.source.userId
+        });
+      } else {
+        // ถ้าส่งแชทส่วนตัว
+        profile = await client.getProfile({ userId: event.source.userId });
+      }
+      if (profile && profile.displayName) {
+        userName = profile.displayName;
+      }
+    }
+  } catch (error) {
+    console.error("Cannot get profile:", error);
+  }
 
-  // 1. เก็บข้อความตัวอักษรลง Google Sheet
+  // 1. รับข้อความตัวอักษรธรรมดา
   if (event.type === 'message' && event.message.type === 'text') {
     const userText = event.message.text;
     
     if (process.env.GOOGLE_SHEET_URL) {
       await axios.post(process.env.GOOGLE_SHEET_URL, {
         type: 'text',
+        userName: userName,
         data: userText
       }).catch(e => console.error(e));
     }
 
     await client.replyMessage({
       replyToken: event.replyToken,
-      messages: [{ type: 'text', text: `📝 บอทบันทึกข้อความ "${userText}" ลง Google Sheet เรียบร้อยครับ!` }]
+      messages: [{ type: 'text', text: `📝 บอทบันทึกข้อความ "${userText}" ของคุณ ${userName} เรียบร้อยครับ!` }]
     });
   }
 
-  // 2. เก็บไฟล์รูปภาพลง Google Sheet + ส่งลิงก์ตารางกลับมาให้คนในกลุ่มเปิดดูคลังรูป
+  // 2. รับรูปภาพ พร้อมแนบลิงก์รูปของ LINE และส่งชื่อคนส่งไปบันทึกด้วย
   if (event.type === 'message' && event.message.type === 'image') {
     const messageId = event.message.id;
-    const lineImageUrl = `https://line.me{messageId}/content`;
+    
+    // สร้างพารามิเตอร์ส่งรูปภาพไปให้ Google Sheet แปลงเป็นรูปจริง
+    const lineImageUrl = `https://line.me{messageId}/content?access_token=${config.channelAccessToken}`;
 
     if (process.env.GOOGLE_SHEET_URL) {
       await axios.post(process.env.GOOGLE_SHEET_URL, {
         type: 'image',
+        userName: userName,
         data: lineImageUrl
       }).catch(e => console.error(e));
     }
 
-    // ข้อความตอบกลับพร้อมลิงก์ตารางคลังรูปถาวรให้คนในกลุ่มกดเข้าดูได้
-    const replyText = `📸 บอทเซฟรูปเข้าคลังถาวรเรียบร้อยครับ!\n\n📂 เปิดดูคลังรูปภาพทั้งหมดของกลุ่มได้ที่ลิงก์นี้ (ไม่มีวันหมดอายุ):\n${myGoogleSheetLink}`;
+    const replyText = `📸 บอทเซฟรูปของคุณ ${userName} เข้าคลังถาวรเรียบร้อยครับ!\n\n📂 เปิดดูคลังรูปภาพทั้งหมดของกลุ่มได้ที่นี่:\n${myGoogleSheetLink}`;
 
     await client.replyMessage({
       replyToken: event.replyToken,
