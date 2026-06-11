@@ -24,63 +24,51 @@ app.post('/webhook', line.middleware(config), (req, res) => {
 async function handleEvent(event) {
   const myGoogleSheetLink = process.env.MY_GOOGLE_SHEET_LINK || "https://google.com";
   
-  // ตรวจสอบห้องแชทและดึงชื่อผู้ส่ง
-  let userName = "ไม่ระบุชื่อ";
+  // 🔍 ตรวจสอบและดึงชื่อไลน์ (Display Name) ของคนส่งรูปภาพ
+  let displayName = "สมาชิกในกลุ่ม";
   try {
-    if (event.source.userId) {
+    if (event.source && event.source.userId) {
       let profile;
       if (event.source.groupId) {
-        // ถ้าส่งในกลุ่ม ให้ดึงโปรไฟล์จากในกลุ่ม
-        profile = await client.getGroupMemberProfile({
-          groupId: event.source.groupId,
-          userId: event.source.userId
-        });
+        profile = await client.getGroupMemberProfile(event.source.groupId, event.source.userId);
       } else {
-        // ถ้าส่งแชทส่วนตัว
-        profile = await client.getProfile({ userId: event.source.userId });
+        profile = await client.getProfile(event.source.userId);
       }
       if (profile && profile.displayName) {
-        userName = profile.displayName;
+        displayName = profile.displayName;
       }
     }
   } catch (error) {
-    console.error("Cannot get profile:", error);
+    console.error("Cannot get profile name:", error);
   }
 
-  // 1. รับข้อความตัวอักษรธรรมดา
+  // ❌ [ยกเลิกการเก็บข้อความ] หากผู้ใช้ส่งข้อความตัวอักษร บอทจะไม่ส่งเข้า Google Sheet
   if (event.type === 'message' && event.message.type === 'text') {
+    // บอทพิมพ์ตอบปกติ แต่จะไม่ส่งข้อมูลไปที่ Google Sheet ครับ ตารางจะสะอาด
     const userText = event.message.text;
-    
-    if (process.env.GOOGLE_SHEET_URL) {
-      await axios.post(process.env.GOOGLE_SHEET_URL, {
-        type: 'text',
-        userName: userName,
-        data: userText
-      }).catch(e => console.error(e));
-    }
-
     await client.replyMessage({
       replyToken: event.replyToken,
-      messages: [{ type: 'text', text: `📝 บอทบันทึกข้อความ "${userText}" ของคุณ ${userName} เรียบร้อยครับ!` }]
+      messages: [{ type: 'text', text: `📝 บอทได้รับข้อความ "${userText}" เรียบร้อยครับ` }]
     });
   }
 
-  // 2. รับรูปภาพ พร้อมแนบลิงก์รูปของ LINE และส่งชื่อคนส่งไปบันทึกด้วย
+  // 📸 [เก็บเฉพาะรูปภาพ] ดักจับรูปภาพและโยนไฟล์ส่งไปวาดลงตารางชีต
   if (event.type === 'message' && event.message.type === 'image') {
     const messageId = event.message.id;
     
-    // สร้างพารามิเตอร์ส่งรูปภาพไปให้ Google Sheet แปลงเป็นรูปจริง
-    const lineImageUrl = `https://line.me{messageId}/content?access_token=${config.channelAccessToken}`;
+    // เปลี่ยนมาใช้โครงสร้างลิงก์รูปภาพขนาดจิ๋ว (Thumbnail) ของ LINE แทน เพื่อให้ Google Sheet ยอมดึงรูปไปวาดได้ 100%
+    const lineImageUrl = `https://line.me{messageId}/content/preview`;
 
     if (process.env.GOOGLE_SHEET_URL) {
       await axios.post(process.env.GOOGLE_SHEET_URL, {
         type: 'image',
-        userName: userName,
-        data: lineImageUrl
+        userName: displayName,
+        data: lineImageUrl,
+        token: config.channelAccessToken // แนบ Token ไปให้ Google Sheets ดึงเบื้องหลัง
       }).catch(e => console.error(e));
     }
 
-    const replyText = `📸 บอทเซฟรูปของคุณ ${userName} เข้าคลังถาวรเรียบร้อยครับ!\n\n📂 เปิดดูคลังรูปภาพทั้งหมดของกลุ่มได้ที่นี่:\n${myGoogleSheetLink}`;
+    const replyText = `📸 บอทเซฟรูปของคุณ ${displayName} เข้าคลังถาวรเรียบร้อยครับ!\n\n📂 เปิดดูคลังรูปภาพทั้งหมดของกลุ่มได้ที่ลิงก์นี้:\n${myGoogleSheetLink}`;
 
     await client.replyMessage({
       replyToken: event.replyToken,
