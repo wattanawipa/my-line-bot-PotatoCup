@@ -15,69 +15,162 @@ const client = new line.messagingApi.MessagingApiClient({
 
 app.post('/webhook', line.middleware(config), (req, res) => {
   res.status(200).end();
-  Promise
-    .all(req.body.events.map(handleEvent))
-    .then(() => console.log('Processed successfully'))
-    .catch((err) => console.error('Error:', err));
+
+  Promise.all(req.body.events.map(handleEvent))
+    .then(() => {
+      console.log('Processed successfully');
+    })
+    .catch((err) => {
+      console.error('Webhook Error:', err);
+    });
 });
 
 async function handleEvent(event) {
-  const myGoogleSheetLink = process.env.MY_GOOGLE_SHEET_LINK || "https://google.com";
-  
-  // 🔍 ปรับปรุง: การดึงข้อมูลโปรไฟล์ของชื่อไลน์จากในกลุ่มด้วยรูปแบบอัปเดตล่าสุด
-  let displayName = "ไม่ระบุชื่อไลน์";
+
+  const myGoogleSheetLink =
+    process.env.MY_GOOGLE_SHEET_LINK ||
+    'https://google.com';
+
+  let displayName = 'ไม่ระบุชื่อไลน์';
+
   try {
+
     if (event.source && event.source.userId) {
+
       let profile;
+
       if (event.source.groupId) {
-        // ดึงชื่อสมาชิกกลุ่มด้วยฟังก์ชัน Object Parameter ล่าสุดของ SDK
+
         profile = await client.getGroupMemberProfile({
           groupId: event.source.groupId,
           userId: event.source.userId
         });
+
       } else {
-        // กรณีส่งแชทส่วนตัวหาบอทตรงๆ
-        profile = await client.getProfile({ userId: event.source.userId });
+
+        profile = await client.getProfile({
+          userId: event.source.userId
+        });
+
       }
+
       if (profile && profile.displayName) {
         displayName = profile.displayName;
       }
     }
+
   } catch (error) {
-    console.error("Cannot get profile name:", error);
+    console.error('Cannot get profile:', error);
   }
 
-  // ไม่เก็บข้อความตัวอักษรลงตาราง (ตารางจะสะอาด)
-  if (event.type === 'message' && event.message.type === 'text') {
+  // -------------------------
+  // รับข้อความ
+  // -------------------------
+  if (
+    event.type === 'message' &&
+    event.message.type === 'text'
+  ) {
+
     const userText = event.message.text;
-    await client.replyMessage({
-      replyToken: event.replyToken,
-      messages: [{ type: 'text', text: `📝 บอทได้รับข้อความ "${userText}" เรียบร้อยครับ` }]
-    });
-  }
 
-  // 📸 เก็บเฉพาะรูปภาพและยิงส่งไปให้ Google Sheet วาดรูป
-  if (event.type === 'message' && event.message.type === 'image') {
-    const messageId = event.message.id;
-    const lineImageUrl = `https://line.me{messageId}/content`;
+    try {
 
-    if (process.env.GOOGLE_SHEET_URL) {
-      await axios.post(process.env.GOOGLE_SHEET_URL, {
-        type: 'image',
-        userName: displayName,
-        data: lineImageUrl,
-        token: config.channelAccessToken
-      }).catch(e => console.error(e));
+      await client.replyMessage({
+        replyToken: event.replyToken,
+        messages: [
+          {
+            type: 'text',
+            text: `📝 บอทได้รับข้อความ "${userText}" เรียบร้อยครับ`
+          }
+        ]
+      });
+
+    } catch (error) {
+      console.error('Reply text error:', error);
     }
 
-    const replyText = `📸 บอทเซฟรูปของคุณ ${displayName} เข้าคลังถาวรเรียบร้อยครับ!\n\n📂 เปิดดูคลังรูปภาพทั้งหมดของกลุ่มได้ที่ลิงก์นี้:\n${myGoogleSheetLink}`;
-
-    await client.replyMessage({
-      replyToken: event.replyToken,
-      messages: [{ type: 'text', text: replyText }]
-    });
+    return;
   }
+
+  // -------------------------
+  // รับรูปภาพ
+  // -------------------------
+  if (
+    event.type === 'message' &&
+    event.message.type === 'image'
+  ) {
+
+    try {
+
+      const messageId = event.message.id;
+
+      console.log(
+        `Image received from ${displayName} : ${messageId}`
+      );
+
+      if (process.env.GOOGLE_SHEET_URL) {
+
+        await axios.post(
+          process.env.GOOGLE_SHEET_URL,
+          {
+            type: 'image',
+            userName: displayName,
+            messageId: messageId,
+            token: config.channelAccessToken
+          },
+          {
+            headers: {
+              'Content-Type': 'application/json'
+            }
+          }
+        );
+
+        console.log('Image data sent to Google Sheet');
+      }
+
+      const replyText =
+        `📸 บอทบันทึกรูปของ ${displayName} เรียบร้อยแล้ว\n\n` +
+        `📂 ดูคลังรูปภาพทั้งหมดได้ที่\n${myGoogleSheetLink}`;
+
+      await client.replyMessage({
+        replyToken: event.replyToken,
+        messages: [
+          {
+            type: 'text',
+            text: replyText
+          }
+        ]
+      });
+
+    } catch (error) {
+
+      console.error('Image process error:', error);
+
+      try {
+
+        await client.replyMessage({
+          replyToken: event.replyToken,
+          messages: [
+            {
+              type: 'text',
+              text: '❌ เกิดข้อผิดพลาดในการบันทึกรูปภาพ'
+            }
+          ]
+        });
+
+      } catch (replyError) {
+        console.error(replyError);
+      }
+    }
+
+    return;
+  }
+
+  return;
 }
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
