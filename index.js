@@ -24,16 +24,19 @@ app.post('/webhook', line.middleware(config), (req, res) => {
 async function handleEvent(event) {
   const myGoogleSheetLink = process.env.MY_GOOGLE_SHEET_LINK || "https://google.com";
   
-  let displayName = "สมาชิกในกลุ่ม";
+  // 🔍 ปรับปรุง: การดึงข้อมูลโปรไฟล์ของชื่อไลน์จากในกลุ่มด้วยรูปแบบอัปเดตล่าสุด
+  let displayName = "ไม่ระบุชื่อไลน์";
   try {
     if (event.source && event.source.userId) {
       let profile;
       if (event.source.groupId) {
+        // ดึงชื่อสมาชิกกลุ่มด้วยฟังก์ชัน Object Parameter ล่าสุดของ SDK
         profile = await client.getGroupMemberProfile({
           groupId: event.source.groupId,
           userId: event.source.userId
         });
       } else {
+        // กรณีส่งแชทส่วนตัวหาบอทตรงๆ
         profile = await client.getProfile({ userId: event.source.userId });
       }
       if (profile && profile.displayName) {
@@ -44,7 +47,7 @@ async function handleEvent(event) {
     console.error("Cannot get profile name:", error);
   }
 
-  // ยกเลิกการเก็บข้อความตัวอักษร
+  // ไม่เก็บข้อความตัวอักษรลงตาราง (ตารางจะสะอาด)
   if (event.type === 'message' && event.message.type === 'text') {
     const userText = event.message.text;
     await client.replyMessage({
@@ -53,11 +56,9 @@ async function handleEvent(event) {
     });
   }
 
-  // 📸 ดักจับรูปภาพ (แก้ไขจุด messageId และลิงก์คอนเทนต์ตัวเต็ม)
+  // 📸 เก็บเฉพาะรูปภาพและยิงส่งไปให้ Google Sheet วาดรูป
   if (event.type === 'message' && event.message.type === 'image') {
     const messageId = event.message.id;
-    
-    // 🌟 แก้ไข: ใช้ตัวแปร messageId จริงใส่เข้าไปในลิงก์ และดึงไฟล์คอนเทนต์ตรงๆ เพื่อไม่ให้ LINE บล็อก
     const lineImageUrl = `https://line.me{messageId}/content`;
 
     if (process.env.GOOGLE_SHEET_URL) {
