@@ -13,10 +13,6 @@ const client = new line.messagingApi.MessagingApiClient({
   channelAccessToken: config.channelAccessToken
 });
 
-const blobClient = new line.messagingApi.MessagingApiBlobClient({
-  channelAccessToken: config.channelAccessToken
-});
-
 app.post('/webhook', line.middleware(config), (req, res) => {
   res.status(200).end();
   Promise
@@ -26,51 +22,44 @@ app.post('/webhook', line.middleware(config), (req, res) => {
 });
 
 async function handleEvent(event) {
-  // 1. รับข้อความตัวอักษรธรรมดา
+  // 1. เก็บข้อความตัวอักษรลง Google Sheet
   if (event.type === 'message' && event.message.type === 'text') {
     const userText = event.message.text;
+    
+    // ส่งข้อมูลไปบันทึกใน Google Sheet (ผ่านระบบ Web App)
+    if (process.env.GOOGLE_SHEET_URL) {
+      await axios.post(process.env.GOOGLE_SHEET_URL, {
+        type: 'text',
+        data: userText
+      }).catch(e => console.error(e));
+    }
+
     await client.replyMessage({
       replyToken: event.replyToken,
-      messages: [{ type: 'text', text: ` ${userText}` }]
+      messages: [{ type: 'text', text: `📝 บอทบันทึกข้อความ "${userText}" ลง Google Sheet เรียบร้อยครับ!` }]
     });
   }
 
-  // 2. รับรูปภาพจาก LINE แล้วส่งเข้าคลังถาวรของ Imgur
+  // 2. เก็บไฟล์รูปภาพลง Google Sheet (เก็บเป็นลิงก์ไฟล์ของ LINE)
   if (event.type === 'message' && event.message.type === 'image') {
     const messageId = event.message.id;
+    // ลิงก์รูปภาพของ LINE (สามารถนำไปเปิดดูในระบบหลังบ้านหรือเบราว์เซอร์ได้)
+    const lineImageUrl = `https://line.me{messageId}/content`;
 
-    try {
-      // ดึงรูปภาพดิบจาก LINE
-      const response = await blobClient.getMessageContent(messageId);
-      const chunks = [];
-      for await (const chunk of response) {
-        chunks.push(chunk);
-      }
-      const buffer = Buffer.concat(chunks);
-
-      // ยิงส่งรูปภาพไปเก็บที่ Imgur
-      const imgurResponse = await axios.post('https://imgur.com', buffer, {
-        headers: {
-          Authorization: `Client-ID ${process.env.IMGUR_CLIENT_ID}`,
-          'Content-Type': 'application/octet-stream',
-        },
-      });
-
-      // ดึงลิงก์รูปภาพถาวร
-      const permanentUrl = imgurResponse.data.data.link;
-
-      // พิมพ์ลิงก์ตอบกลับเข้าไปในแชท LINE
-      await client.replyMessage({
-        replyToken: event.replyToken,
-        messages: [{ 
-          type: 'text', 
-          text: `📸 เซฟรูปเข้าคลังถาวรเรียบร้อยครับ!\nลิงก์ดูรูปฟรีตลอดไป:\n${permanentUrl}` 
-        }]
-      });
-
-    } catch (err) {
-      console.error('Imgur Upload Failed:', err.message);
+    if (process.env.GOOGLE_SHEET_URL) {
+      await axios.post(process.env.GOOGLE_SHEET_URL, {
+        type: 'image',
+        data: lineImageUrl
+      }).catch(e => console.error(e));
     }
+
+    await client.replyMessage({
+      replyToken: event.replyToken,
+      messages: [{ 
+        type: 'text', 
+        text: `📸 บอทเซฟลิงก์รูปภาพลงตาราง Google Sheet ให้เรียบร้อยแล้วครับ!` 
+      }]
+    });
   }
 }
 
